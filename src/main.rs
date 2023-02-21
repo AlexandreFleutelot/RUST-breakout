@@ -51,7 +51,9 @@ struct Brick;
 struct Paddle;
 
 #[derive(Component)]
-struct Ball;
+struct Ball {
+    velocity: Vec3,
+}
 
 // Main
 
@@ -73,8 +75,10 @@ fn main() {
     .add_startup_system(setup_system)
     .add_system(game_screens_system)
     .add_system_set(
-        SystemSet::on_exit(GameState::MainMenu)
-            .with_system(init_game_system))
+        SystemSet::on_enter(GameState::MainMenu)
+            .with_system(initialise_game_system))
+    .add_system(ball_movement)
+    .add_system(paddle_movement)
     .run();
 }
 
@@ -112,7 +116,7 @@ fn game_screens_system(
     }
 }
 
-fn init_game_system(
+fn initialise_game_system(
     mut commands: Commands,
     mut game_data: ResMut<GameData>,
     asset_server: Res<AssetServer>
@@ -156,10 +160,62 @@ fn init_game_system(
         texture: asset_server.load(BALL_SPRITES),
         ..Default::default()
     })
-    .insert(Ball);
+    .insert(Ball {velocity: Vec3::new(200.0,200.0, 0.0)});
 
     //init life and score
     game_data.lifes = 3;
     game_data.score = 0;
 }
 
+fn ball_movement(
+    mut ball_query: Query<(&mut Transform, &Ball), Without<Paddle>>,
+    paddle_query: Query<&Transform, With<Paddle>>,
+    game_state: Res<State<GameState>>,
+    time: Res<Time>
+) {
+    for (mut ball_tf, ball) in ball_query.iter_mut(){
+        match game_state.current() {
+            GameState::MainMenu => {
+                if let Ok(paddle_tf) = paddle_query.get_single() {
+                    ball_tf.translation = paddle_tf.translation + Vec3::new(0.0, 18.0, 0.0);
+                }
+            },
+            GameState::Playing => {
+                let delta = time.delta().as_secs_f32();
+                ball_tf.translation += ball.velocity * delta;
+            }
+            GameState::Pause => (),
+            GameState::GameOverScreen => (),
+            GameState::WinScreen => (),
+        }
+    }
+}
+
+fn paddle_movement(
+    mut paddle_query: Query<&mut Transform, With<Paddle>>,
+    kb: Res<Input<KeyCode>>,
+    game_state: Res<State<GameState>>,
+    time: Res<Time>
+) {
+    match game_state.current() {
+        GameState::MainMenu | GameState::Playing => {
+            if let Ok(mut paddle_tf) = paddle_query.get_single_mut() {
+                let delta = time.delta().as_secs_f32();
+                if kb.pressed(KeyCode::Left) {
+                    paddle_tf.translation += Vec3::new(-300.0,0.0,0.0) * delta;
+                }
+                if kb.pressed(KeyCode::Right) {
+                    paddle_tf.translation += Vec3::new(300.0,0.0,0.0) * delta;
+                }
+            }
+        },
+        GameState::Pause => (),
+        GameState::GameOverScreen => (),
+        GameState::WinScreen => (),
+    }
+
+}
+
+fn ball_collision() {
+
+}
