@@ -1,4 +1,4 @@
-use bevy::prelude::*;
+use bevy::{prelude::*, sprite::collide_aabb::{collide, Collision}};
 
 // Constants
 
@@ -27,7 +27,7 @@ const BALL_SCALE: Vec3 = Vec3::new(0.15,0.15,1.);
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 enum GameState {
-    MainMenu,
+    Start,
     Playing,
     Pause,
     GameOverScreen,
@@ -52,10 +52,9 @@ struct Paddle;
 
 #[derive(Component)]
 struct Ball {
-    velocity: Vec3,
+    direction: Vec3,
+    speed: f32,
 }
-
-// Main
 
 fn main() {
 
@@ -70,15 +69,16 @@ fn main() {
 
     App::new()
     .add_plugins(DefaultPlugins.set(window))
-    .add_state(GameState::MainMenu)
+    .add_state(GameState::Start)
     .insert_resource(GameData { score: 0, lifes: 3 })
     .add_startup_system(setup_system)
     .add_system(game_screens_system)
     .add_system_set(
-        SystemSet::on_enter(GameState::MainMenu)
+        SystemSet::on_enter(GameState::Start)
             .with_system(initialise_game_system))
     .add_system(ball_movement)
     .add_system(paddle_movement)
+    .add_system(ball_collision)
     .run();
 }
 
@@ -93,7 +93,7 @@ fn game_screens_system(
     mut game_state: ResMut<State<GameState>>
 ) {
     match game_state.current() {
-        GameState::MainMenu => {
+        GameState::Start => {
             if kb.just_pressed(KeyCode::Space) {
                 game_state.set(GameState::Playing).unwrap();
             }
@@ -110,7 +110,7 @@ fn game_screens_system(
         },
         GameState::WinScreen | GameState::GameOverScreen => {
             if kb.just_pressed(KeyCode::Space) {
-                game_state.set(GameState::MainMenu).unwrap();
+                game_state.set(GameState::Start).unwrap();
             }
         }
     }
@@ -160,7 +160,7 @@ fn initialise_game_system(
         texture: asset_server.load(BALL_SPRITES),
         ..Default::default()
     })
-    .insert(Ball {velocity: Vec3::new(200.0,200.0, 0.0)});
+    .insert(Ball {direction: Vec3::new(1.0,1.0, 0.0), speed: 500.0 });
 
     //init life and score
     game_data.lifes = 3;
@@ -175,14 +175,14 @@ fn ball_movement(
 ) {
     for (mut ball_tf, ball) in ball_query.iter_mut(){
         match game_state.current() {
-            GameState::MainMenu => {
+            GameState::Start => {
                 if let Ok(paddle_tf) = paddle_query.get_single() {
-                    ball_tf.translation = paddle_tf.translation + Vec3::new(0.0, 18.0, 0.0);
+                    ball_tf.translation = paddle_tf.translation + Vec3::new(0.0, 20.0, 0.0);
                 }
             },
             GameState::Playing => {
                 let delta = time.delta().as_secs_f32();
-                ball_tf.translation += ball.velocity * delta;
+                ball_tf.translation += ball.direction.normalize() * ball.speed * delta;
             }
             GameState::Pause => (),
             GameState::GameOverScreen => (),
@@ -198,15 +198,17 @@ fn paddle_movement(
     time: Res<Time>
 ) {
     match game_state.current() {
-        GameState::MainMenu | GameState::Playing => {
+        GameState::Start | GameState::Playing => {
             if let Ok(mut paddle_tf) = paddle_query.get_single_mut() {
                 let delta = time.delta().as_secs_f32();
                 if kb.pressed(KeyCode::Left) {
-                    paddle_tf.translation += Vec3::new(-300.0,0.0,0.0) * delta;
+                    paddle_tf.translation += Vec3::new(-500.0,0.0,0.0) * delta;
                 }
                 if kb.pressed(KeyCode::Right) {
-                    paddle_tf.translation += Vec3::new(300.0,0.0,0.0) * delta;
+                    paddle_tf.translation += Vec3::new(500.0,0.0,0.0) * delta;
                 }
+                let limit = (WINDOW_WIDTH - PADDLE_SIZE.x * PADDLE_SCALE.x)/2.;
+                paddle_tf.translation.x = paddle_tf.translation.x.clamp(-limit, limit);
             }
         },
         GameState::Pause => (),
@@ -216,6 +218,58 @@ fn paddle_movement(
 
 }
 
-fn ball_collision() {
+fn ball_collision(
+    mut commands: Commands,
+    paddle_query: Query<(&Transform, With<Paddle>), Without<Ball>>,
+    brick_query: Query<(&Transform, Entity, With<Brick>), Without<Ball>>,
+    mut ball_query: Query<(&mut Transform, &mut Ball)>
+) {
+    for (mut ball_tf, mut ball) in ball_query.iter_mut(){
 
+        //right, left
+        let border = WINDOW_WIDTH/2. - BALL_SIZE.x*BALL_SCALE.x/2.;
+        if ball_tf.translation.x < -border || ball_tf.translation.x > border {
+            ball.direction *= Vec3::new(-1.0,1.0,1.0);
+        }
+
+        //ceiling
+        let ceiling = WINDOW_HEIGHT/2. - BALL_SIZE.x*BALL_SCALE.x/2.;
+        if ball_tf.translation.y > ceiling {
+            ball.direction *= Vec3::new(1.0,-1.0,1.0);
+        }
+
+        //paddle
+        if let Ok((paddle_tf, _)) = paddle_query.get_single() {
+            let collision = collide(
+                ball_tf.translation,
+                BALL_SIZE * Vec2::new(BALL_SCALE.x, BALL_SCALE.y),
+                paddle_tf.translation,
+                PADDLE_SIZE * Vec2::new(PADDLE_SCALE.x, PADDLE_SCALE.y)
+            );
+            if let Some(_) = collision {
+                let delta = 2.*(ball_tf.translation.x - paddle_tf.translation.x) / (PADDLE_SIZE.x * PADDLE_SCALE.x);
+                ball.direction.x += 0.5*delta;
+                ball.direction.y *= -1.0;
+                ball.direction = ball.direction.normalize();
+            }
+        }
+
+        //bricks
+        for (brick_tf, brick, _) in brick_query.iter() {
+            let collision = collide(
+                ball_tf.translation,
+                BALL_SIZE * Vec2::new(BALL_SCALE.x, BALL_SCALE.y),
+                brick_tf.translation,
+                BRICK_SIZE * Vec2::new(BRICK_SCALE.x, BRICK_SCALE.y)
+            );
+            if let Some(_) = collision {
+                commands.entity(brick).despawn();
+                match collision.unwrap() {
+                    Collision::Left | Collision::Right => ball.direction *= Vec3::new(-1.0,1.0,1.0),
+                    Collision::Top | Collision::Bottom => ball.direction *= Vec3::new(1.0,-1.0,1.0),
+                    Collision::Inside => (),
+                }
+            }
+        }
+    }
 }
