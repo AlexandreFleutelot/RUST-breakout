@@ -1,4 +1,5 @@
-use bevy::{prelude::*, sprite::collide_aabb::{collide, Collision}};
+use bevy::prelude::*;
+use bevy::sprite::collide_aabb::{collide, Collision};
 
 // Constants
 
@@ -27,7 +28,8 @@ const BALL_SCALE: Vec3 = Vec3::new(0.15,0.15,1.);
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 enum GameState {
-    Start,
+    Welcome,
+    WaitLaunch,
     Playing,
     Pause,
     GameOverScreen,
@@ -36,7 +38,7 @@ enum GameState {
 
 // Resources
 
-#[derive(Resource)]
+#[derive(Debug, Resource)]
 struct GameData {
     score: u32,
     lifes: u32,
@@ -69,13 +71,16 @@ fn main() {
 
     App::new()
     .add_plugins(DefaultPlugins.set(window))
-    .add_state(GameState::Start)
+    .add_state(GameState::Welcome)
     .insert_resource(GameData { score: 0, lifes: 3 })
     .add_startup_system(setup_system)
     .add_system(game_screens_system)
     .add_system_set(
-        SystemSet::on_enter(GameState::Start)
+        SystemSet::on_enter(GameState::Welcome)
             .with_system(initialise_game_system))
+    .add_system_set(
+        SystemSet::on_update(GameState::Playing)
+            .with_system(game_lost))
     .add_system(ball_movement)
     .add_system(paddle_movement)
     .add_system(ball_collision)
@@ -93,7 +98,12 @@ fn game_screens_system(
     mut game_state: ResMut<State<GameState>>
 ) {
     match game_state.current() {
-        GameState::Start => {
+        GameState::Welcome => {
+            if kb.just_pressed(KeyCode::Space) {
+                game_state.set(GameState::WaitLaunch).unwrap();
+            }
+        },
+        GameState::WaitLaunch => {
             if kb.just_pressed(KeyCode::Space) {
                 game_state.set(GameState::Playing).unwrap();
             }
@@ -110,9 +120,9 @@ fn game_screens_system(
         },
         GameState::WinScreen | GameState::GameOverScreen => {
             if kb.just_pressed(KeyCode::Space) {
-                game_state.set(GameState::Start).unwrap();
+                game_state.set(GameState::Welcome).unwrap();
             }
-        }
+        },
     }
 }
 
@@ -162,9 +172,8 @@ fn initialise_game_system(
     })
     .insert(Ball {direction: Vec3::new(1.0,1.0, 0.0), speed: 500.0 });
 
-    //init life and score
-    game_data.lifes = 3;
     game_data.score = 0;
+    game_data.lifes = 3;
 }
 
 fn ball_movement(
@@ -175,7 +184,7 @@ fn ball_movement(
 ) {
     for (mut ball_tf, ball) in ball_query.iter_mut(){
         match game_state.current() {
-            GameState::Start => {
+            GameState::WaitLaunch => {
                 if let Ok(paddle_tf) = paddle_query.get_single() {
                     ball_tf.translation = paddle_tf.translation + Vec3::new(0.0, 20.0, 0.0);
                 }
@@ -187,6 +196,7 @@ fn ball_movement(
             GameState::Pause => (),
             GameState::GameOverScreen => (),
             GameState::WinScreen => (),
+            GameState::Welcome => (),
         }
     }
 }
@@ -198,7 +208,7 @@ fn paddle_movement(
     time: Res<Time>
 ) {
     match game_state.current() {
-        GameState::Start | GameState::Playing => {
+        GameState::WaitLaunch | GameState::Playing => {
             if let Ok(mut paddle_tf) = paddle_query.get_single_mut() {
                 let delta = time.delta().as_secs_f32();
                 if kb.pressed(KeyCode::Left) {
@@ -214,17 +224,19 @@ fn paddle_movement(
         GameState::Pause => (),
         GameState::GameOverScreen => (),
         GameState::WinScreen => (),
+        GameState::Welcome => (),
     }
 
 }
 
 fn ball_collision(
     mut commands: Commands,
+    mut game_data: ResMut<GameData>,
     paddle_query: Query<(&Transform, With<Paddle>), Without<Ball>>,
     brick_query: Query<(&Transform, Entity, With<Brick>), Without<Ball>>,
     mut ball_query: Query<(&mut Transform, &mut Ball)>
 ) {
-    for (mut ball_tf, mut ball) in ball_query.iter_mut(){
+    for (ball_tf, mut ball) in ball_query.iter_mut(){
 
         //right, left
         let border = WINDOW_WIDTH/2. - BALL_SIZE.x*BALL_SCALE.x/2.;
@@ -264,6 +276,7 @@ fn ball_collision(
             );
             if let Some(_) = collision {
                 commands.entity(brick).despawn();
+                game_data.score += 1;
                 match collision.unwrap() {
                     Collision::Left | Collision::Right => ball.direction *= Vec3::new(-1.0,1.0,1.0),
                     Collision::Top | Collision::Bottom => ball.direction *= Vec3::new(1.0,-1.0,1.0),
@@ -272,4 +285,24 @@ fn ball_collision(
             }
         }
     }
+}
+
+fn game_lost(
+    mut game_data: ResMut<GameData>,
+    mut game_state: ResMut<State<GameState>>,
+    mut ball_query: Query<(&Transform, &mut Ball)>
+) {
+    if let Ok((ball_tf, mut ball)) = ball_query.get_single_mut() {
+        println!("{:?}",game_data);
+        if ball_tf.translation.y < -WINDOW_HEIGHT/2. {
+            if game_data.lifes <= 1 {
+                game_state.set(GameState::GameOverScreen).unwrap();
+            }else{
+                game_state.set(GameState::WaitLaunch).unwrap();
+                ball.direction = Vec3::new(1.0,1.0, 0.0);
+                game_data.lifes -= 1;
+            }
+        }
+    }
+    
 }
