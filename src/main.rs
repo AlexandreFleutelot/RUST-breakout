@@ -3,6 +3,7 @@ use bevy::sprite::collide_aabb::{collide, Collision};
 
 // Constants
 
+const TOPBAR_HEIGHT: f32 = 30.0;
 const WINDOW_WIDTH: f32 = 800.;
 const WINDOW_HEIGHT: f32 = 600.;
 
@@ -58,6 +59,9 @@ struct Ball {
     speed: f32,
 }
 
+#[derive(Component)]
+struct ScoreBoard;
+
 fn main() {
 
     let window = WindowPlugin {
@@ -84,6 +88,7 @@ fn main() {
     .add_system(ball_movement)
     .add_system(paddle_movement)
     .add_system(ball_collision)
+    .add_system(scoreboard_system)
     .run();
 }
 
@@ -131,12 +136,11 @@ fn initialise_game_system(
     mut game_data: ResMut<GameData>,
     asset_server: Res<AssetServer>
 ) {
-
     //spawn bricks
     for x in 0..BRICK_COLUMNS as u32 {
         for y in 0..BRICK_LINES as u32 {
             let pos_x = BRICK_BEGIN_X + (BRICK_SPACES+BRICK_SIZE.x*BRICK_SCALE.x) * x as f32;
-            let pos_y = BRICK_BEGIN_Y + (BRICK_SPACES+BRICK_SIZE.y*BRICK_SCALE.y) * y as f32;
+            let pos_y = BRICK_BEGIN_Y + (BRICK_SPACES+BRICK_SIZE.y*BRICK_SCALE.y) * y as f32 - TOPBAR_HEIGHT;
 
             commands.spawn(SpriteBundle { 
                 transform: Transform {
@@ -172,6 +176,43 @@ fn initialise_game_system(
     })
     .insert(Ball {direction: Vec3::new(1.0,1.0, 0.0), speed: 500.0 });
 
+    //top bar
+    commands.spawn(SpriteBundle { 
+        sprite: Sprite { 
+            color: Color::WHITE, 
+            custom_size: Some(Vec2::new(WINDOW_WIDTH,1.0)), 
+            ..Default::default()
+        }, 
+        transform: Transform::from_xyz(0.0, WINDOW_HEIGHT/2.0 - TOPBAR_HEIGHT, 3.0), 
+        ..Default::default()
+    });
+    commands.spawn(TextBundle {
+        text: Text {
+            sections: vec![
+                TextSection {
+                    value: "Score: ".to_string(),
+                    style: TextStyle {
+                        font: asset_server.load("fonts/FiraSans-Bold.ttf"),
+                        font_size: 33.0,
+                        color: Color::rgb(1.0, 1.0, 1.0),
+                    },
+                },
+                TextSection {
+                    value: "".to_string(),
+                    style: TextStyle {
+                        font: asset_server.load("fonts/FiraSans-Bold.ttf"),
+                        font_size: 33.0,
+                        color: Color::rgb(1.0, 0.05, 0.0),
+                    },
+                },
+            ],
+            ..Default::default()
+        },
+        ..Default::default()
+    })
+    .insert(ScoreBoard);
+    
+    
     game_data.score = 0;
     game_data.lifes = 3;
 }
@@ -236,7 +277,7 @@ fn ball_collision(
     brick_query: Query<(&Transform, Entity, With<Brick>), Without<Ball>>,
     mut ball_query: Query<(&mut Transform, &mut Ball)>
 ) {
-    for (ball_tf, mut ball) in ball_query.iter_mut(){
+    for (mut ball_tf, mut ball) in ball_query.iter_mut(){
 
         //right, left
         let border = WINDOW_WIDTH/2. - BALL_SIZE.x*BALL_SCALE.x/2.;
@@ -245,8 +286,9 @@ fn ball_collision(
         }
 
         //ceiling
-        let ceiling = WINDOW_HEIGHT/2. - BALL_SIZE.x*BALL_SCALE.x/2.;
+        let ceiling = WINDOW_HEIGHT/2. - BALL_SIZE.x*BALL_SCALE.x/2. - TOPBAR_HEIGHT;
         if ball_tf.translation.y > ceiling {
+            ball_tf.translation.y = ceiling -1.0;
             ball.direction *= Vec3::new(1.0,-1.0,1.0);
         }
 
@@ -305,4 +347,13 @@ fn game_lost(
         }
     }
     
+}
+
+fn scoreboard_system(
+    game_data: Res<GameData>, 
+    mut query: Query<&mut Text, With<ScoreBoard>>
+) {
+    for mut text in query.iter_mut() {
+        text.sections[1].value = game_data.score.to_string();
+    }
 }
