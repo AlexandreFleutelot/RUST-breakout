@@ -13,6 +13,10 @@ const BRICK_LINES: f32 = 4.0;
 const BRICK_COLUMNS: f32 = 9.0;
 const BRICK_SPACES: f32 = 8.0;
 
+const LIFE_SPRITE: &str = "sprites/life.png";
+const LIFE_SIZE: Vec2 = Vec2::new(87.0, 97.0);
+const LIFE_SCALE: Vec3 = Vec3::new(0.3,0.3,1.);
+
 const BRICK_SPRITE: &str = "sprites/red_brick.png";
 const BRICK_SIZE: Vec2 = Vec2::new(225.0, 76.0);
 const BRICK_SCALE: Vec3 = Vec3::new(0.3,0.3,1.);
@@ -42,7 +46,7 @@ enum GameState {
 #[derive(Debug, Resource)]
 struct GameData {
     score: u32,
-    lifes: u32,
+    lifes: f32,
 }
 
 // Components
@@ -62,6 +66,11 @@ struct Ball {
 #[derive(Component)]
 struct ScoreBoard;
 
+#[derive(Component)]
+struct LifeHeart{
+    val: f32
+}
+
 fn main() {
 
     let window = WindowPlugin {
@@ -76,7 +85,7 @@ fn main() {
     App::new()
     .add_plugins(DefaultPlugins.set(window))
     .add_state(GameState::Welcome)
-    .insert_resource(GameData { score: 0, lifes: 3 })
+    .insert_resource(GameData { score: 0, lifes: 3. })
     .add_startup_system(setup_system)
     .add_system(game_screens_system)
     .add_system_set(
@@ -89,6 +98,7 @@ fn main() {
     .add_system(paddle_movement)
     .add_system(ball_collision)
     .add_system(scoreboard_system)
+    .add_system(lifeheart_system)
     .run();
 }
 
@@ -211,10 +221,30 @@ fn initialise_game_system(
         ..Default::default()
     })
     .insert(ScoreBoard);
+
+    //lifes
+    let shift = LIFE_SIZE.x * LIFE_SCALE.x + 5.0;
+    let mut spawn_life = |index: f32| {
+        commands.spawn(SpriteBundle {
+            transform: Transform {
+                translation: Vec3::new(
+                    WINDOW_WIDTH/2.0 - shift*index,
+                    WINDOW_HEIGHT/2. - shift/2. + 1., 
+                    3.0), 
+                rotation: Quat::IDENTITY, 
+                scale: LIFE_SCALE },
+            texture: asset_server.load(LIFE_SPRITE),
+            visibility: Visibility { is_visible: true },
+            ..Default::default()
+        })
+        .insert(LifeHeart {val:index as f32});
+    };
     
-    
+    for i in 1..=3 {
+        spawn_life(i as f32);
+    }
     game_data.score = 0;
-    game_data.lifes = 3;
+    game_data.lifes = 3.;
 }
 
 fn ball_movement(
@@ -337,12 +367,12 @@ fn game_lost(
     if let Ok((ball_tf, mut ball)) = ball_query.get_single_mut() {
         println!("{:?}",game_data);
         if ball_tf.translation.y < -WINDOW_HEIGHT/2. {
-            if game_data.lifes <= 1 {
+            if game_data.lifes <= 1. {
                 game_state.set(GameState::GameOverScreen).unwrap();
             }else{
                 game_state.set(GameState::WaitLaunch).unwrap();
                 ball.direction = Vec3::new(1.0,1.0, 0.0);
-                game_data.lifes -= 1;
+                game_data.lifes -= 1.;
             }
         }
     }
@@ -355,5 +385,16 @@ fn scoreboard_system(
 ) {
     for mut text in query.iter_mut() {
         text.sections[1].value = game_data.score.to_string();
+    }
+}
+
+fn lifeheart_system(
+    game_data: Res<GameData>, 
+    mut heart_query: Query<(&mut Visibility, &LifeHeart)>
+) {
+    for (mut heart_vis, heart) in heart_query.iter_mut() {
+        if heart.val > game_data.lifes {
+            heart_vis.is_visible=false;
+        }
     }
 }
