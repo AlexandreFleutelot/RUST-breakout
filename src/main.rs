@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use bevy::reflect::GetPath;
 use bevy::sprite::collide_aabb::{collide, Collision};
 
 // Constants
@@ -90,10 +91,16 @@ fn main() {
     .add_system(game_screens_system)
     .add_system_set(
         SystemSet::on_enter(GameState::Welcome)
+            .label("init")
             .with_system(initialise_game_system))
     .add_system_set(
+        SystemSet::on_enter(GameState::Welcome)
+            .before("init")
+            .with_system(delete_all_objects))
+    .add_system_set(
         SystemSet::on_update(GameState::Playing)
-            .with_system(game_lost))
+            .with_system(game_lost)
+            .with_system(check_win_system))
     .add_system(ball_movement)
     .add_system(paddle_movement)
     .add_system(ball_collision)
@@ -138,6 +145,17 @@ fn game_screens_system(
                 game_state.set(GameState::Welcome).unwrap();
             }
         },
+    }
+}
+
+fn delete_all_objects(
+    mut commands: Commands,
+    query: Query<Entity>,
+) {
+    for entity in query.iter() {
+        if entity.index() != 0 {
+            commands.entity(entity).despawn();
+        }
     }
 }
 
@@ -365,7 +383,6 @@ fn game_lost(
     mut ball_query: Query<(&Transform, &mut Ball)>
 ) {
     if let Ok((ball_tf, mut ball)) = ball_query.get_single_mut() {
-        println!("{:?}",game_data);
         if ball_tf.translation.y < -WINDOW_HEIGHT/2. {
             if game_data.lifes <= 1. {
                 game_state.set(GameState::GameOverScreen).unwrap();
@@ -378,6 +395,17 @@ fn game_lost(
     }
     
 }
+
+
+fn check_win_system(
+    brick_query: Query<Entity, With<Brick>>,
+    mut game_state: ResMut<State<GameState>>
+) {
+    if brick_query.is_empty() {
+        game_state.set(GameState::WinScreen).unwrap();
+    }
+}
+
 
 fn scoreboard_system(
     game_data: Res<GameData>, 
